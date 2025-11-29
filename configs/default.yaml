@@ -1,0 +1,62 @@
+# default logging verbosity (can be overridden with --verbose)
+verbose: false
+
+wandb:
+  enabled: true
+  project: "rag-runs"
+  run_name: "baseline-v1"
+
+data:
+  input_dir: "data"
+  glob_pattern: "**/*.txt"
+
+chunking:
+  chunk_size: 512
+  chunk_overlap: 64
+  strategy: "default"             # or "custom"
+
+embedding:
+  model_name: "sentence-transformers/all-mpnet-base-v2"
+  device: "cuda"                  # "cuda" if you want GPU
+
+retriever:
+  top_k: 5
+
+vector_store:
+  uri: "/dccstor/meghanadhp/projects/rag_recipes/indexes/my_corpus_index/milvus.db"
+  drop_old: true
+
+llm:
+  provider: "hf"
+  model_name: "/path/to/your/checkpoint" # local dir or HF repo id
+  temperature: 0.1
+  max_tokens: 256                        # we’ll use this as max_new_tokens
+  pipeline_task: "text-generation"       # or "text2text-generation" if needed (optional)
+
+prompt:
+  use_system_message: true
+  system_message: |
+    You are an assistant for question-answering tasks. Use the following pieces of retrieved context to answer the question. If you don't know the answer, just say that you don't know. Use three sentences maximum and keep the answer concise.
+
+  template: | 
+    {{ system_message }}
+    Question: {{ question }}
+    Context: {{ context }}
+    Answer: 
+
+test_data:
+  path: "data/test.jsonl"    # path to your eval dataset
+  loader: "jsonl"            # "jsonl" or "csv"
+
+preprocessing:
+  module: "tasks.example.custom_functions"
+  function: "preprocess_dataset"
+
+metrics:
+  module: "tasks.example.custom_functions"
+  function: "compute_metrics"
+
+local_dump:
+  enabled: true
+  output_dir: "outputs"     # base directory for all runs
+  filename: "results.jsonl" # you can override in task configs if needed
