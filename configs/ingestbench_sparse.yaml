@@ -1,0 +1,74 @@
+# default logging verbosity (can be overridden with --verbose)
+verbose: false
+
+wandb:
+  enabled: true
+  project: "IngestBench"
+  run_name: ${wandb_run_name}
+  custom_logging_function: "tasks.ingestbench.custom_functions.log_depth_heatmaps"
+
+chunking:
+  strategy: "custom"          
+  custom_chunker_module: "tasks.ingestbench.custom_functions"
+  custom_chunker_fn: "chunker"
+  params: 
+    input_path: /dccstor/meghanadhp/projects/IngestBench/data/scientific_research/${gen_cfg}/prose/paraphrased_prose.jsonl
+
+
+retriever: 
+  type: sparse
+  top_k: ${top_k}
+  dump_path: "/dccstor/meghanadhp/projects/rag_recipes/indexes/ingestbench/dump_chunks_${gen_cfg}.jsonl"
+
+llm:
+  provider: ${llm_provider}       
+  model_name: "meta-llama/Llama-3.1-8B-Instruct"
+  temperature: 0
+  max_tokens: 256
+  response_format: tasks.ingestbench.custom_functions.OutputSchema
+  device: "cuda:1"
+  seed: 42
+
+prompt:
+  use_system_message: true
+  system_message: |
+    You are an assistant for question-answering tasks, applying reasoning or inference when needed.  
+    Return only the final factual answer as a Python list of strings.  
+    Do not include explanations, reasoning steps, or extra text.  
+    If the answer cannot be determined from the context, return an empty list.
+    If the question is a yes/no question, return ["Yes"] or ["No"]. 
+    Otherwise, return a list of entity names that answers the question. Only generate the entity name or names and nothing else.
+  template: | 
+    {{ system_message }}
+    Question: {{ question }}
+    Context: {{ context }}
+    Answer: 
+
+
+
+test_data:
+  path: "/dccstor/meghanadhp/projects/IngestBench/data/scientific_research/${gen_cfg}/qas/multihop_v2/benchmark.jsonl"    # path to your eval dataset
+  loader: "jsonl"            # "jsonl" or "csv"
+
+preprocessing:
+  module: "tasks.ingestbench.custom_functions"
+  function: "preprocess_dataset"
+  # params: 
+  #   num_examples: 10
+
+metrics:
+  module: "tasks.ingestbench.custom_functions"
+  function: "compute_metrics"
+
+local_dump:
+  enabled: true
+  output_dir: "outputs/ingestbench"
+  filename: ${filename}
+  retrieval_dump_path: "outputs/ingestbench/retrieval_${filename}"
+
+defaults:
+  gen_cfg: mini
+  filename: sparse_results.jsonl
+  top_k: 5
+  llm_provider: vllm
+  wandb_run_name: rag-baseline

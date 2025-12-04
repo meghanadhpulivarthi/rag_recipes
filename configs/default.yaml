@@ -13,18 +13,10 @@ data:
 chunking:
   chunk_size: 512
   chunk_overlap: 64
-  strategy: "default"             # or "custom"
-
-embedding:
-  model_name: "sentence-transformers/all-mpnet-base-v2"
-  device: "cuda"                  # "cuda" if you want GPU
+  strategy: "default"             # or "custom"                  # "cuda" if you want GPU
 
 retriever:
   top_k: 5
-
-vector_store:
-  uri: "/dccstor/meghanadhp/projects/rag_recipes/indexes/my_corpus_index/milvus.db"
-  drop_old: true
 
 llm:
   provider: "hf"
@@ -60,3 +52,4 @@ local_dump:
   enabled: true
   output_dir: "outputs"     # base directory for all runs
   filename: "results.jsonl" # you can override in task configs if needed
+  retrieval_dump_path: null # set this in task configs when using split retrieval/generation

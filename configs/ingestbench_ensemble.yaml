@@ -1,10 +1,10 @@
 # default logging verbosity (can be overridden with --verbose)
-verbose: true
+verbose: false
 
 wandb:
   enabled: true
   project: "IngestBench"
-  run_name: "rag-baseline"
+  run_name: ${wandb_run_name}
   custom_logging_function: "tasks.ingestbench.custom_functions.log_depth_heatmaps"
 
 chunking:
@@ -12,18 +12,26 @@ chunking:
   custom_chunker_module: "tasks.ingestbench.custom_functions"
   custom_chunker_fn: "chunker"
   params: 
-    input_path: /dccstor/meghanadhp/projects/IngestBench/data/scientific_research/large/prose/prose.jsonl
+    input_path: /dccstor/meghanadhp/projects/IngestBench/data/scientific_research/${gen_cfg}/prose/paraphrased_prose.jsonl
 
-embedding:
-  model_name: "Qwen/Qwen3-Embedding-4B"
-  device: "cuda:0"
-
-vector_store:
-  uri: "/dccstor/meghanadhp/projects/rag_recipes/indexes/ingestbench/milvus.db"
-  drop_old: true
+retriever:
+  type: ensemble
+  weights: [0.6, 0.4]
+  retrievers:
+    - type: dense
+      top_k: ${top_k}
+      embedding:
+        model_name: "Qwen/Qwen3-Embedding-4B"
+        device: "cuda:0"
+      vector_store:
+        uri: "/dccstor/meghanadhp/projects/rag_recipes/indexes/ingestbench/milvus_${gen_cfg}.db"
+        drop_old: true
+    - type: sparse
+      top_k: ${top_k}
+      dump_path: "/dccstor/meghanadhp/projects/rag_recipes/indexes/ingestbench/dump_chunks_${gen_cfg}.jsonl"
 
 llm:
-  provider: "vllm"       
+  provider: ${llm_provider}       
   model_name: "meta-llama/Llama-3.1-8B-Instruct"
   temperature: 0
   max_tokens: 256
@@ -49,11 +57,11 @@ prompt:
 
 
 test_data:
-  path: "/dccstor/meghanadhp/projects/IngestBench/data/scientific_research/large/qas/multihop_v2/benchmark.jsonl"    # path to your eval dataset
+  path: "/dccstor/meghanadhp/projects/IngestBench/data/scientific_research/${gen_cfg}/qas/multihop_v2/benchmark.jsonl"    # path to your eval dataset
   loader: "jsonl"            # "jsonl" or "csv"
 
 preprocessing:
-  module: "tasks.example.custom_functions"
+  module: "tasks.ingestbench.custom_functions"
   function: "preprocess_dataset"
   # params: 
   #   num_examples: 10
@@ -65,4 +73,13 @@ metrics:
 local_dump:
   enabled: true
   output_dir: "outputs/ingestbench"
-  filename: "large_cfg_results.jsonl"
+  filename: ${filename}
+  retrieval_dump_path: "outputs/ingestbench/retrieval_${filename}"
+
+
+defaults: 
+  gen_cfg: mini
+  top_k: 5
+  filename: ensemble_results.jsonl
+  llm_provider: vllm
+  wandb_run_name: rag-baseline

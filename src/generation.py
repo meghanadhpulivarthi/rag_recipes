@@ -15,8 +15,6 @@ import torch
 import wandb
 from jinja2 import Template
 from langchain_core.documents import Document
-from langchain_milvus import Milvus
-from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_openai import ChatOpenAI
 
 from config_utils import load_config, RAGConfig, vprint
@@ -24,6 +22,7 @@ from vllm.sampling_params import SamplingParams, GuidedDecodingParams
 from IPython.core.debugger import Pdb
 from datetime import datetime
 import uuid
+from retrieval import load_retrieval_results, format_context
 
 
 
@@ -80,42 +79,6 @@ def load_schema(schema_path: str):
     schema_cls = getattr(module, class_name)
     return schema_cls
 
-# ------------- Embeddings, index, LLM -------------
-
-
-def build_embeddings(cfg: RAGConfig):
-    emb_cfg = cfg.embedding
-    print(
-        f"[GEN] Loading embeddings model='{emb_cfg.model_name}' "
-        f"on device='{emb_cfg.device}'..."
-    )
-    t0 = time.perf_counter()
-    embeddings = HuggingFaceEmbeddings(
-        model_name=emb_cfg.model_name,
-        model_kwargs={"device": emb_cfg.device},
-    )
-    t1 = time.perf_counter()
-    print(f"[GEN] Embeddings model loaded in {t1 - t0:.3f}s.")
-    return embeddings
-
-
-def load_vector_store(embeddings, cfg: RAGConfig) -> Milvus:
-    vs_cfg = cfg.vector_store
-
-    uri = getattr(vs_cfg, "uri", None)
-    collection_name = os.path.basename(os.path.dirname(uri).rstrip("/"))
-    print(f"[GEN] Loading Milvus collection '{collection_name}' from uri='{uri}'...")
-    t0 = time.perf_counter()
-    vectordb = Milvus(
-        embeddings,
-        connection_args={
-                "uri": uri,
-            },
-        collection_name=collection_name,
-    )
-    t1 = time.perf_counter()
-    print(f"[GEN] Milvus collection '{collection_name}' loaded in {t1 - t0:.3f}s.")
-    return vectordb
 
 
 def build_llm(cfg: RAGConfig):
@@ -192,37 +155,35 @@ def build_llm(cfg: RAGConfig):
 # ------------- RAG core -------------
 
 
-def format_context(docs: List[Document]) -> str:
-    parts = []
-    for i, d in enumerate(docs, start=1):
-        snippet = d.page_content.strip()
-        parts.append(f"[DOC {i} | {d.metadata.get('source', 'unknown')}]\n{snippet}")
-    return "\n\n".join(parts)
-
-
 def run_rag_query(
     question: str,
-    vectordb: Milvus,
+    retrieval_results: Dict[str, Any],
     llm: ChatOpenAI,
     cfg: RAGConfig,
 ) -> Dict[str, Any]:
     vprint(f"[GEN] Running RAG query for question: '{question[:80]}...'")
     t0 = time.perf_counter()
-
-    # Retrieval
-    retriever = vectordb.as_retriever(
-        search_kwargs={"k": cfg.retriever.top_k}
-    )
-    t_retr_start = time.perf_counter()
-    retrieved_docs = retriever.invoke(question)
+    
+    # Load retrieved docs from pre-computed results
+    if question not in retrieval_results:
+        raise ValueError(f"No retrieval results found for question: {question}")
+    
+    retrieval_data = retrieval_results[question]
+    
+    # Convert back to Document objects
+    retrieved_docs = [
+        Document(page_content=doc_data["page_content"], metadata=doc_data["metadata"])
+        for doc_data in retrieval_data["retrieved_docs"]
+    ]
+    
     t_retr_end = time.perf_counter()
     vprint(
-        f"[GEN] Retrieved {len(retrieved_docs)} docs "
-        f"in {t_retr_end - t_retr_start:.3f}s (top_k={cfg.retriever.top_k})."
+        f"[GEN] Loaded {len(retrieved_docs)} pre-retrieved docs "
+        f"(top_k={cfg.retriever.top_k})."
     )
 
     # Context + prompt from config template
-    context_str = format_context(retrieved_docs)
+    context_str = retrieval_data["context"]  # Use pre-computed context
     prompt_cfg = cfg.prompt
     template = Template(prompt_cfg.template)
     rendered_prompt = template.render(
@@ -269,7 +230,7 @@ def run_rag_query(
         "context": context_str,
         "prompt": rendered_prompt,
         "latency_total": t1 - t0,
-        "latency_retrieval": t_retr_end - t_retr_start,
+        "latency_retrieval": retrieval_data["latency_retrieval"],
         "latency_llm": t_llm_end - t_llm_start,
     }
 
@@ -289,9 +250,7 @@ def init_wandb(cfg: RAGConfig):
         config={
             "verbose": cfg.verbose,
             "chunking": vars(cfg.chunking),
-            "embedding": vars(cfg.embedding),
             "retriever": vars(cfg.retriever),
-            "vector_store": vars(cfg.vector_store),
             "llm": vars(cfg.llm),
             "test_data": vars(cfg.test_data),
             "metrics": vars(cfg.metrics),
@@ -307,8 +266,20 @@ def load_metric_fn(cfg: RAGConfig):
     fn = getattr(module, m_cfg.function)
     return fn
 
+
 def main(cfg: RAGConfig):
     overall_start = time.perf_counter()
+
+    # Check if retrieval dump path is configured
+    if not cfg.local_dump.retrieval_dump_path:
+        print("[GEN] Error: retrieval_dump_path not configured in local_dump config.")
+        print("[GEN] Please run retrieval.py first to generate retrieval results.")
+        return
+    
+    if not os.path.exists(cfg.local_dump.retrieval_dump_path):
+        print(f"[GEN] Error: Retrieval dump file not found: {cfg.local_dump.retrieval_dump_path}")
+        print("[GEN] Please run retrieval.py first to generate retrieval results.")
+        return
 
     # W&B + metric function
     run = init_wandb(cfg)
@@ -316,13 +287,16 @@ def main(cfg: RAGConfig):
         print(f"[GEN] W&B run initialized: {run.name}")
     metric_fn = load_metric_fn(cfg)
 
-    # Infra
-    embeddings = build_embeddings(cfg)
-    vectordb = load_vector_store(embeddings, cfg)
+    # Load pre-computed retrieval results
+    print(f"[GEN] Loading retrieval results from {cfg.local_dump.retrieval_dump_path}...")
+    retrieval_results = load_retrieval_results(cfg.local_dump.retrieval_dump_path)
+
+    # LLM only
     llm = build_llm(cfg)
 
     infra_elapsed = time.perf_counter() - overall_start
-    print(f"[GEN] Initialization (embeddings + index + LLM) completed in {infra_elapsed:.3f}s.")
+    print(f"[GEN] Initialization (LLM only) completed in {infra_elapsed:.3f}s.")
+
 
     # Dataset
     raw_examples = load_test_dataset(cfg)
@@ -356,7 +330,7 @@ def main(cfg: RAGConfig):
         gold = ex["gold"]
         meta = ex.get("meta", {})
 
-        result = run_rag_query(q, vectordb, llm, cfg)
+        result = run_rag_query(q, retrieval_results, llm, cfg)
         pred = result["answer"].strip()
         gold_stripped = gold.strip()
 
@@ -369,6 +343,7 @@ def main(cfg: RAGConfig):
             wb_table = wandb.Table(
                 columns=["idx", "question", "meta", "prediction", "gold", "prompt", "retrieved_docs", "num_retrieved", "latency_total", "latency_retrieval", "latency_llm"] + [f"metrics/{k}" for k in metric_keys]
             ) if cfg.wandb.enabled and wandb.run is not None else None
+            vprint("[GEN] Metric keys:", metric_keys)
 
         for k, v in metric_dict.items():
             metric_sums[k] += float(v)
@@ -473,31 +448,12 @@ if __name__ == "__main__":
     parser.add_argument("--task_config", type=str, default=None)
     parser.add_argument("--verbose", action="store_true")
 
-    # wandb
-    parser.add_argument("--wandb_enabled", action="store_true")
-    parser.add_argument("--wandb_project", type=str, default=None)
-    parser.add_argument("--wandb_run_name", type=str, default=None)
+    # Parse known args first to get task_config path
+    known_args, _ = parser.parse_known_args()
     
-    # retrieval
-    parser.add_argument("--top_k", type=int, default=None)
-
-    # LLM
-    parser.add_argument("--llm_provider", type=str, default=None)
-    parser.add_argument("--llm_model_name", type=str, default=None)
-    parser.add_argument("--llm_temperature", type=float, default=None)
-    parser.add_argument("--llm_max_tokens", type=int, default=None)
-    parser.add_argument("--llm_pipeline_task", type=str, default=None)
-
-
-    # test data
-    parser.add_argument("--test_data_path", type=str, default=None)
-    parser.add_argument("--test_data_loader", type=str, default=None)
-
-    # preprocessing / metrics
-    parser.add_argument("--preproc_module", type=str, default=None)
-    parser.add_argument("--preproc_fn", type=str, default=None)
-    parser.add_argument("--metrics_module", type=str, default=None)
-    parser.add_argument("--metrics_fn", type=str, default=None)
+    # Add dynamic CLI arguments based on defaults in task config
+    task_config_path = known_args.task_config or "configs/ingestbench_dense.yaml"
+    arg_mapping = config_utils.add_dynamic_cli_args(parser, task_config_path)
 
     args = parser.parse_args()
 
@@ -505,45 +461,18 @@ if __name__ == "__main__":
         config_utils.GLOBAL_VERBOSE = True
         print("[GEN] Verbose mode enabled via CLI.")
 
+    # Extract dynamic CLI overrides
+    cli_overrides = {}
+    for cli_arg, var_name in arg_mapping.items():
+        cli_value = getattr(args, var_name, None)
+        if cli_value is not None:
+            cli_overrides[var_name] = cli_value
+            print(f"[CONFIG] CLI override: {var_name} = {cli_value}")
+
     cfg = load_config(
         default_path=args.default_config,
         task_path=args.task_config,
+        cli_overrides=cli_overrides,
     )
-
-    # CLI overrides
-    if args.wandb_enabled is not None:
-        cfg.wandb.enabled = args.wandb_enabled
-    if args.wandb_project is not None:
-        cfg.wandb.project = args.wandb_project
-    if args.wandb_run_name is not None:
-        cfg.wandb.run_name = args.wandb_run_name
-
-    if args.top_k is not None:
-        cfg.retriever.top_k = args.top_k
-
-    if args.llm_provider is not None:
-        cfg.llm.provider = args.llm_provider
-    if args.llm_model_name is not None:
-        cfg.llm.model_name = args.llm_model_name
-    if args.llm_temperature is not None:
-        cfg.llm.temperature = args.llm_temperature
-    if args.llm_max_tokens is not None:
-        cfg.llm.max_tokens = args.llm_max_tokens
-    if args.llm_pipeline_task is not None:
-        cfg.llm.pipeline_task = args.llm_pipeline_task
-
-    if args.test_data_path is not None:
-        cfg.test_data.path = args.test_data_path
-    if args.test_data_loader is not None:
-        cfg.test_data.loader = args.test_data_loader
-
-    if args.preproc_module is not None:
-        cfg.preprocessing.module = args.preproc_module
-    if args.preproc_fn is not None:
-        cfg.preprocessing.function = args.preproc_fn
-    if args.metrics_module is not None:
-        cfg.metrics.module = args.metrics_module
-    if args.metrics_fn is not None:
-        cfg.metrics.function = args.metrics_fn
 
     main(cfg)

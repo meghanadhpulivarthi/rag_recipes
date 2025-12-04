@@ -1,4 +1,4 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from src.config_utils import RAGConfig, vprint
 from langchain_core.documents import Document
 import pandas as pd
@@ -16,8 +16,47 @@ def chunker(cfg: RAGConfig, input_path: str) -> List[Document]:
     data = pd.read_json(input_path, lines=True)
     docs = []
     for _, row in data.iterrows():
-        docs.append(Document(page_content=row["prose"], metadata={"source": row["doc_id"], "doc_id": row["doc_id"], "entity_id": row["entity_id"]}))
+        docs.append(Document(page_content=row["paraphrased_prose"], metadata={"source": row["doc_id"], "doc_id": row["doc_id"], "entity_id": row["entity_id"], "num_words": row["num_paraphrased_prose_words"]}))
     return docs
+
+def preprocess_dataset(
+    raw_examples: List[Dict[str, Any]],
+    cfg: RAGConfig,
+    num_examples: Optional[int] = None
+) -> List[Dict[str, Any]]:
+    """
+    Turn raw dataset records into a standard format:
+    [{"question": str, "gold": str, "meta": {...}}, ...]
+
+    This is corpus-specific; adapt it to your test set schema.
+    The default implementation expects JSON/CSV rows with
+    fields 'question' and 'answer'.
+    """
+    print("[PREPROC] Starting dataset preprocessing...")
+    processed = []
+    if num_examples is not None:
+        raw_examples = raw_examples[:num_examples]
+    for i, ex in enumerate(raw_examples):
+        # Example assumptions; change to what your dataset actually uses
+        q = ex.get("paraphrased_question")
+        gold = ex.get("answer")
+
+        if q is None or gold is None:
+            print(f"[PREPROC][WARN] Skipping example {i} due to missing fields.")
+            continue
+
+        item = {
+            "question": str(q),
+            "gold": str(gold),
+            "meta": {
+                "idx": i,
+                **{k: v for k, v in ex.items() if k not in {"paraphrased_question", "answer"}},
+            },
+        }
+        processed.append(item)
+
+    print(f"[PREPROC] Completed preprocessing. Kept {len(processed)} examples.")
+    return processed
 
 def compute_metrics(
     prediction: str,
@@ -57,6 +96,8 @@ def compute_metrics(
     gt_facts = list(set(ast.literal_eval(gold)))
     gt_facts = _normalize_list(gt_facts)
 
+    fact_acc = 1.0 if pred_facts == gt_facts else 0.0
+
     recalled = 0
     for gf in gt_facts:
         for pf in pred_facts:
@@ -65,6 +106,7 @@ def compute_metrics(
                 break
 
     fact_recall = recalled / len(gt_facts)
+
     if len(pred_facts) == 0:
         fact_precision = 0.0
     else:
@@ -82,6 +124,7 @@ def compute_metrics(
         "fact_recall": fact_recall,
         "fact_precision": fact_precision,
         "fact_f1": fact_f1,
+        "fact_acc": fact_acc,
         "num_fact_recalled": recalled,
         "num_gt_facts": len(gt_facts),
         "num_pred_facts": len(pred_facts)

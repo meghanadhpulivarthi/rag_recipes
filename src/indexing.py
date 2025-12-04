@@ -11,11 +11,8 @@ if project_root not in sys.path:
     sys.path.insert(0, project_root)
 
 from langchain_core.documents import Document
-from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_milvus import Milvus
-from langchain_huggingface import HuggingFaceEmbeddings
-
-from config_utils import load_config, RAGConfig, vprint, GLOBAL_VERBOSE
+from config_utils import load_config, RAGConfig, vprint, GLOBAL_VERBOSE, SparseRetrieverConfig, DenseRetrieverConfig
 
 def load_raw_documents(cfg: RAGConfig) -> List[Document]:
     data_cfg = cfg.data
@@ -43,6 +40,8 @@ def load_raw_documents(cfg: RAGConfig) -> List[Document]:
 
 
 def default_chunk_documents(docs: List[Document], cfg: RAGConfig) -> List[Document]:
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+
     chunk_cfg = cfg.chunking
     print(
         f"[INDEX] Using default chunking: chunk_size={chunk_cfg.chunk_size}, "
@@ -79,9 +78,15 @@ def custom_chunk_documents(cfg: RAGConfig) -> List[Document]:
     return chunks
 
 
-def build_vector_store(chunks: List[Document], cfg: RAGConfig) -> Milvus:
-    emb_cfg = cfg.embedding
-    vs_cfg = cfg.vector_store
+def build_vector_store(chunks: List[Document], retriever_cfg: DenseRetrieverConfig) -> Milvus:
+    from langchain_huggingface import HuggingFaceEmbeddings
+
+    if isinstance(retriever_cfg, dict):
+        emb_cfg = retriever_cfg["embedding"]
+        vs_cfg = retriever_cfg["vector_store"]
+    else:
+        emb_cfg = retriever_cfg.embedding
+        vs_cfg = retriever_cfg.vector_store
 
     print(f"[INDEX] Building embeddings with model='{emb_cfg.model_name}', device='{emb_cfg.device}'")
     t0 = time.perf_counter()
@@ -112,6 +117,20 @@ def build_vector_store(chunks: List[Document], cfg: RAGConfig) -> Milvus:
     print(f"[INDEX] Milvus collection '{collection_name}' built in {t3 - t2:.3f}s.")
     return vectordb
 
+def dump_chunks(chunks: List[Document], retriever_cfg: SparseRetrieverConfig):
+    import json
+    if isinstance(retriever_cfg, dict):
+        dump_path = retriever_cfg["dump_path"]
+    else:
+        dump_path = retriever_cfg.dump_path
+    with open(dump_path, "w", encoding="utf-8") as f:
+        for chunk in chunks:
+            # Convert Document to dict for JSON serialization
+            chunk_dict = {
+                "page_content": chunk.page_content,
+                "metadata": chunk.metadata
+            }
+            f.write(json.dumps(chunk_dict, ensure_ascii=False) + "\n")
 
 def main(cfg: RAGConfig):
     overall_start = time.perf_counter()
@@ -125,8 +144,16 @@ def main(cfg: RAGConfig):
         chunks = default_chunk_documents(docs, cfg)
 
     # 3) Build vector store
-    vectordb = build_vector_store(chunks, cfg)
-
+    if cfg.retriever.type == "sparse":
+        dump_chunks(chunks, cfg.retriever)
+    elif cfg.retriever.type == "dense":
+        vectordb = build_vector_store(chunks, cfg.retriever)
+    elif cfg.retriever.type == "ensemble":
+        for retriever in cfg.retriever.retrievers:
+            if retriever["type"] == "dense":
+                vectordb = build_vector_store(chunks, retriever)
+            elif retriever["type"] == "sparse":
+                dump_chunks(chunks, retriever)
     overall_elapsed = time.perf_counter() - overall_start
     print(f"[INDEX] Full indexing pipeline completed in {overall_elapsed:.3f}s.")
 
@@ -140,17 +167,14 @@ if __name__ == "__main__":
 
     parser.add_argument("--default_config", type=str, default="configs/default.yaml")
     parser.add_argument("--task_config", type=str, default=None)
-
     parser.add_argument("--verbose", action="store_true")
 
-    # hyperparam overrides
-    parser.add_argument("--chunk_size", type=int, default=None)
-    parser.add_argument("--chunk_overlap", type=int, default=None)
-    parser.add_argument("--chunk_strategy", type=str, default=None)
-    parser.add_argument("--embedding_model_name", type=str, default=None)
-    parser.add_argument("--embedding_device", type=str, default=None)
-    parser.add_argument("--uri", type=str, default=None)
-    parser.add_argument("--drop_old", type=bool, default=None)
+    # Parse known args first to get task_config path
+    known_args, _ = parser.parse_known_args()
+    
+    # Add dynamic CLI arguments based on defaults in task config
+    task_config_path = known_args.task_config or "configs/ingestbench_dense.yaml"
+    arg_mapping = config_utils.add_dynamic_cli_args(parser, task_config_path)
 
     args = parser.parse_args()
 
@@ -158,25 +182,18 @@ if __name__ == "__main__":
         config_utils.GLOBAL_VERBOSE = True
         print("[INDEX] Verbose mode enabled via CLI.")
 
+    # Extract dynamic CLI overrides
+    cli_overrides = {}
+    for cli_arg, var_name in arg_mapping.items():
+        cli_value = getattr(args, var_name, None)
+        if cli_value is not None:
+            cli_overrides[var_name] = cli_value
+            print(f"[CONFIG] CLI override: {var_name} = {cli_value}")
+
     cfg = load_config(
         default_path=args.default_config,
         task_path=args.task_config,
+        cli_overrides=cli_overrides,
     )
-
-    # CLI overrides (highest priority)
-    if args.chunk_size is not None:
-        cfg.chunking.chunk_size = args.chunk_size
-    if args.chunk_overlap is not None:
-        cfg.chunking.chunk_overlap = args.chunk_overlap
-    if args.chunk_strategy is not None:
-        cfg.chunking.strategy = args.chunk_strategy
-    if args.embedding_model_name is not None:
-        cfg.embedding.model_name = args.embedding_model_name
-    if args.embedding_device is not None:
-        cfg.embedding.device = args.embedding_device
-    if args.uri is not None:
-        cfg.vector_store.uri = args.uri
-    if args.drop_old is not None:
-        cfg.vector_store.drop_old = args.drop_old
 
     main(cfg)
