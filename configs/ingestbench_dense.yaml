@@ -19,18 +19,18 @@ retriever:
   top_k: ${top_k}
   embedding:
     model_name: "Qwen/Qwen3-Embedding-4B"
-    device: "cuda:0"
+    device: "cuda"
   vector_store:
     uri: "/dccstor/meghanadhp/projects/rag_recipes/indexes/ingestbench/milvus_${gen_cfg}.db"
     drop_old: true
 
 llm:
   provider: ${llm_provider}       
-  model_name: "meta-llama/Llama-3.1-8B-Instruct"
+  model_name: ${model_name}
   temperature: 0
-  max_tokens: 256
+  max_tokens: 2048
   response_format: tasks.ingestbench.custom_functions.OutputSchema
-  device: "cuda:1"
+  device: "cuda"
   seed: 42
 
 prompt:
@@ -39,8 +39,9 @@ prompt:
     You are an assistant for question-answering tasks, applying reasoning or inference when needed.  
     Return only the final factual answer as a Python list of strings.  
     Do not include explanations, reasoning steps, or extra text.  
-    If the answer cannot be determined from the context, return an empty list.
+    If the answer cannot be determined from the context, return ["None"].
     If the question is a yes/no question, return ["Yes"] or ["No"]. 
+    If the answer is a numeric value, return it as a string inside a list, e.g., ["42"].
     Otherwise, return a list of entity names that answers the question. Only generate the entity name or names and nothing else.
   template: | 
     {{ system_message }}
@@ -66,9 +67,9 @@ metrics:
 
 local_dump:
   enabled: true
-  output_dir: "outputs/ingestbench"
+  output_dir: "outputs/ingestbench/generation"
   filename: ${filename}
-  retrieval_dump_path: "outputs/ingestbench/retrieval_${filename}"
+  retrieval_dump_path: "outputs/ingestbench/retrieval/${filename}"
 
 defaults:
   gen_cfg: mini
@@ -76,3 +77,4 @@ defaults:
   top_k: 5
   wandb_run_name: rag-baseline
   llm_provider: vllm
+  model_name: meta-llama/Llama-3.1-8B-Instruct

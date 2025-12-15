@@ -20,7 +20,8 @@ def substitute_templates(data: Any, defaults: Dict[str, str]) -> Any:
         # Find all ${variable} patterns and replace them
         def replace_var(match):
             var_name = match.group(1)
-            return defaults.get(var_name, match.group(0))  # Keep original if not found
+            value = defaults.get(var_name, match.group(0))
+            return str(value)  # Ensure replacement is always a string
         
         return re.sub(r'\$\{([^}]+)\}', replace_var, data)
     elif isinstance(data, dict):

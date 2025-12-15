@@ -71,30 +71,21 @@ def load_vector_store(embeddings, retriever_cfg: DenseRetrieverConfig) -> Milvus
 def get_sparse_retriever(retriever_cfg: SparseRetrieverConfig):
     """Build BM25 sparse retriever from document dump."""
     if isinstance(retriever_cfg, dict):
-        top_k = retriever_cfg["top_k"]
         dump_path = retriever_cfg["dump_path"]
     else:
-        top_k = retriever_cfg.top_k
         dump_path = retriever_cfg.dump_path
     chunks = [json.loads(line) for line in open(dump_path, "r") if line.strip()]
     retriever = BM25Retriever.from_documents(       
-        [Document(page_content=chunk['page_content'], metadata=chunk['metadata']) for chunk in chunks],
-        k=int(top_k),
+        [Document(page_content=chunk['page_content'], metadata=chunk['metadata']) for chunk in chunks]
     )
     return retriever
 
 
 def get_dense_retriever(retriever_cfg: DenseRetrieverConfig):
     """Build dense retriever using embeddings and vector store."""
-    if isinstance(retriever_cfg, dict):
-        top_k = retriever_cfg["top_k"]
-    else:
-        top_k = retriever_cfg.top_k
     embeddings = build_embeddings(retriever_cfg)
     vectordb = load_vector_store(embeddings, retriever_cfg)
-    retriever = vectordb.as_retriever(
-        search_kwargs={"k": int(top_k)}
-    )
+    retriever = vectordb.as_retriever()
     return retriever
 
 
@@ -123,7 +114,7 @@ def retrieve_documents(question: str, retriever, cfg: RAGConfig) -> Dict[str, An
     vprint(f"[RET] Retrieving docs for question: '{question[:80]}...'")
     t0 = time.perf_counter()
     
-    retrieved_docs = retriever.invoke(question)
+    retrieved_docs = retriever.invoke(question, search_kwargs={"k": cfg.retriever.top_k})
     t1 = time.perf_counter()
     
     vprint(

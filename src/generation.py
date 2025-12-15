@@ -7,6 +7,7 @@ from collections import defaultdict
 from typing import Any, Dict, List
 import torch.distributed as dist
 
+
 # Add current directory to Python path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -23,6 +24,7 @@ from IPython.core.debugger import Pdb
 from datetime import datetime
 import uuid
 from retrieval import load_retrieval_results, format_context
+from utils import get_rits_llm
 
 
 
@@ -149,11 +151,17 @@ def build_llm(cfg: RAGConfig):
         print(f"[GEN] vLLM LLM initialized on device={llm_cfg.device} in {t1 - t0:.3f}s.")
         return llm
 
+    if provider == "rits":
+        t0 = time.perf_counter()
+        llm = get_rits_llm(llm_cfg.model_name)
+        t1 = time.perf_counter()
+        print(f"[GEN] RITS LLM initialized in {t1 - t0:.3f}s.")
+        return llm
+
     raise ValueError(f"[GEN] LLM provider '{llm_cfg.provider}' not implemented.")
 
 
 # ------------- RAG core -------------
-
 
 def run_rag_query(
     question: str,
@@ -199,7 +207,7 @@ def run_rag_query(
     if cfg.llm.provider in {"hf", "hf_pipeline", "local_hf", "openai"}:
         resp = llm.invoke(rendered_prompt)
         answer = resp.content if hasattr(resp, "content") else str(resp)
-    elif cfg.llm.provider in {"vllm", "local_vllm"}:
+    elif cfg.llm.provider in {"vllm", "local_vllm", "rits"}:
         # vLLM path
         if hasattr(cfg.llm, 'response_format') and cfg.llm.response_format is not None:
             schema = load_schema(cfg.llm.response_format)
@@ -209,14 +217,25 @@ def run_rag_query(
         # Format messages for vLLM
         messages = [{"role": "user", "content": rendered_prompt}]
         
-        guided_decoding_params = GuidedDecodingParams(json=schema.model_json_schema() if schema else None)
-        sampling_params = SamplingParams(
-            guided_decoding=guided_decoding_params,
-            temperature=cfg.llm.temperature,
-            max_tokens=cfg.llm.max_tokens,
-        )
-        resp = llm.chat(messages, sampling_params=sampling_params)
-        answer = resp[0].outputs[0].text
+        if cfg.llm.provider == "rits":
+            llm = llm.with_structured_output(schema) if schema else llm
+            resp = llm.invoke(messages, temperature=cfg.llm.temperature, max_tokens=cfg.llm.max_tokens)
+            try:
+                resp_dict = resp.model_dump()
+                answer = json.dumps(resp_dict, ensure_ascii=False)
+            except Exception:
+                answer = resp.model_dump_json()
+        elif cfg.llm.provider in {"vllm", "local_vllm"}:
+            guided_decoding_params = GuidedDecodingParams(json=schema.model_json_schema() if schema else None)
+            sampling_params = SamplingParams(
+                guided_decoding=guided_decoding_params,
+                temperature=cfg.llm.temperature,
+                max_tokens=cfg.llm.max_tokens,
+            )
+            resp = llm.chat(messages, sampling_params=sampling_params)
+            answer = resp[0].outputs[0].text
+
+
     t_llm_end = time.perf_counter()
     vprint(f"[GEN] LLM call completed in {t_llm_end - t_llm_start:.3f}s.")
 
@@ -329,9 +348,8 @@ def main(cfg: RAGConfig):
         q = ex["question"]
         gold = ex["gold"]
         meta = ex.get("meta", {})
-
         result = run_rag_query(q, retrieval_results, llm, cfg)
-        pred = result["answer"].strip()
+        pred = result["answer"]
         gold_stripped = gold.strip()
 
         # Compute custom metrics
@@ -411,11 +429,18 @@ def main(cfg: RAGConfig):
         for k in metric_keys:
             agg_payload[f"eval_mean_{k}"] = metric_sums[k] / n
 
-        wandb.log(agg_payload)
+        try:
+            wandb.log(agg_payload)
+        except Exception as e:
+            print(f"[GEN] Warning: Failed to log aggregate metrics to wandb: {e}")
 
         # log the table itself
         if wb_table is not None:
-            wandb.log({"eval_table": wb_table})
+            try:
+                wandb.log({"eval_table": wb_table})
+            except Exception as e:
+                print(f"[GEN] Warning: Failed to log eval_table to wandb: {e}")
+                print("[GEN] Continuing without table logging...")
 
         if cfg.wandb.custom_logging_function:
             module_path, function_name = cfg.wandb.custom_logging_function.rsplit('.', 1)
@@ -423,8 +448,11 @@ def main(cfg: RAGConfig):
             custom_logging_fn = getattr(custom_module, function_name)
             custom_logging_fn(cfg, wandb, payloads)
 
-        wandb.finish()
-        print("[GEN] W&B run finished.")
+        try:
+            wandb.finish()
+            print("[GEN] W&B run finished.")
+        except Exception as e:
+            print(f"[GEN] Warning: Error finishing wandb run: {e}")
 
     try:
         if dist.is_initialized():
