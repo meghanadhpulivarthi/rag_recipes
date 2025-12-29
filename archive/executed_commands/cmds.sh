@@ -1,1 +1,0 @@
-bsub -J longbenchv2_job -gpu "num=1/task:mode=exclusive_process:gmodel=NVIDIAA100_SXM4_80GB" -M 256G -n 1 -oo logs/longbenchv2.out -eo logs/longbenchv2.err bash executed_commands/end_to_end.sh

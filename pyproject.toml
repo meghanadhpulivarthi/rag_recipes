@@ -34,5 +34,5 @@ dev = [
 ]
 
 [project.scripts]
-rag-recipes = "src.cli:main"
+rag-recipes = "cli:main"
 
