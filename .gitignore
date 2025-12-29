@@ -12,3 +12,4 @@ logs
 outputs
 wandb
 indexes
+.env
