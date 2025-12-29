@@ -34,7 +34,7 @@ dev = [
 ]
 
 [project.scripts]
-rag-index = "src.cli:main_index"
-rag-retrieve = "src.cli:main_retrieve"
-rag-generate = "src.cli:main_generate"
+rag-index = "rag_recipes.src.cli:main_index"
+rag-retrieve = "rag_recipes.src.cli:main_retrieve"
+rag-generate = "rag_recipes.src.cli:main_generate"
 
