@@ -1,7 +1,7 @@
 [project]
 name = "rag-recipes"
 version = "0.1.0"
-description = "Add your description here"
+description = "Reusable RAG (Retrieval-Augmented Generation) pipeline components with indexing, retrieval, and generation phases"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -32,3 +32,9 @@ dependencies = [
 dev = [
     "ipykernel>=7.1.0",
 ]
+
+[project.scripts]
+rag-index = "src.cli:main_index"
+rag-retrieve = "src.cli:main_retrieve"
+rag-generate = "src.cli:main_generate"
+
