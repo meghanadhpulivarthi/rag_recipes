@@ -1,16 +1,17 @@
 """
 RAG Recipes CLI interface.
 
-Provides command-line access to RAG pipeline phases:
-- rag-index: Run indexing phase
-- rag-retrieve: Run retrieval phase
-- rag-generate: Run generation phase
+Provides command-line access to RAG pipeline phases via subcommands:
+- rag-recipes index: Run indexing phase
+- rag-recipes retrieve: Run retrieval phase
+- rag-recipes generate: Run generation phase
 
 Can be imported and used programmatically from other packages.
 """
 
 import sys
 import subprocess
+import argparse
 from pathlib import Path
 
 
@@ -64,6 +65,46 @@ def run_generation(*args, **kwargs):
     return subprocess.run(cmd, cwd=rag_root)
 
 
+def main():
+    """Main entry point for rag-recipes CLI with subcommands."""
+    parser = argparse.ArgumentParser(
+        prog="rag-recipes",
+        description="RAG Recipes - Reusable RAG pipeline components"
+    )
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+    
+    # Index subcommand
+    subparsers.add_parser("index", help="Run indexing phase")
+    
+    # Retrieve subcommand
+    subparsers.add_parser("retrieve", help="Run retrieval phase")
+    
+    # Generate subcommand
+    subparsers.add_parser("generate", help="Run generation phase")
+    
+    # Parse only the command, pass rest to subprocess
+    args, remaining = parser.parse_known_args()
+    
+    if args.command == "index":
+        rag_root = get_rag_root()
+        script = rag_root / "src" / "indexing.py"
+        result = subprocess.run([sys.executable, str(script)] + remaining, cwd=rag_root)
+        sys.exit(result.returncode)
+    elif args.command == "retrieve":
+        rag_root = get_rag_root()
+        script = rag_root / "src" / "retrieval.py"
+        result = subprocess.run([sys.executable, str(script)] + remaining, cwd=rag_root)
+        sys.exit(result.returncode)
+    elif args.command == "generate":
+        rag_root = get_rag_root()
+        script = rag_root / "src" / "generation.py"
+        result = subprocess.run([sys.executable, str(script)] + remaining, cwd=rag_root)
+        sys.exit(result.returncode)
+    else:
+        parser.print_help()
+        sys.exit(1)
+
+
 def main_index():
     """Entry point for rag-index CLI command."""
     rag_root = get_rag_root()
@@ -86,3 +127,4 @@ def main_generate():
     script = rag_root / "src" / "generation.py"
     result = subprocess.run([sys.executable, str(script)] + sys.argv[1:], cwd=rag_root)
     sys.exit(result.returncode)
+
