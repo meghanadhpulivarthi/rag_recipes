@@ -89,7 +89,7 @@ class WandbConfig:
     enabled: bool
     project: str
     run_name: Optional[str]
-    custom_logging_function: Optional[str]
+    custom_logging_function: Optional[str] = None
 
 @dataclass
 class DataConfig:
