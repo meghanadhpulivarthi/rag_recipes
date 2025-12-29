@@ -74,6 +74,175 @@ All three phases are available as CLI commands that can be invoked from any dire
 - `rag-retrieve`: Search indexed documents for relevant context
 - `rag-generate`: Generate responses with retrieved context using an LLM
 
+### Command-Line Interface
+
+All CLI commands support the following standard arguments plus dynamic configuration overrides.
+
+#### Common Arguments (All Commands)
+
+All three CLI commands (`rag-index`, `rag-retrieve`, `rag-generate`) support these base arguments:
+
+- `--default_config <path>` - Path to the default configuration file (default: `configs/default.yaml`)
+- `--task_config <path>` - Path to the task-specific configuration file that overrides defaults (optional)
+- `--verbose` - Enable verbose logging output (flag, no value needed)
+
+#### Dynamic Configuration Overrides
+
+In addition to the common arguments, RAG Recipes supports **dynamic CLI arguments** that are automatically generated from your configuration file's `defaults` section. Any key in the `defaults` section of your YAML configuration can be overridden via CLI using the format:
+
+```bash
+rag-index --key_name value
+```
+
+For example, if your config has:
+```yaml
+defaults:
+  chunk_size: 512
+  model_name: "sentence-transformers/all-MiniLM-L6-v2"
+```
+
+You can override these at runtime:
+```bash
+rag-index --chunk_size 1024 --model_name "sentence-transformers/all-mpnet-base-v2"
+```
+
+#### rag-index Command
+
+**Purpose**: Process and chunk raw documents, build vector indices for dense retrieval, or dump chunks for sparse retrieval.
+
+**Basic Usage**:
+```bash
+rag-index --default_config configs/default.yaml --task_config configs/my_task.yaml
+```
+
+**Arguments**:
+- `--default_config <path>` - Default configuration file (default: `configs/default.yaml`)
+- `--task_config <path>` - Task-specific config that overrides defaults (optional)
+- `--verbose` - Enable verbose logging
+- `--<config_var>` - Any variable from `defaults` section in config file
+
+**Example**:
+```bash
+rag-index \
+  --default_config configs/default.yaml \
+  --task_config configs/ingestbench_dense.yaml \
+  --verbose \
+  --chunk_size 512 \
+  --chunk_overlap 50
+```
+
+#### rag-retrieve Command
+
+**Purpose**: Search indexed documents and retrieve relevant context for given questions.
+
+**Basic Usage**:
+```bash
+rag-retrieve --default_config configs/default.yaml --task_config configs/my_task.yaml
+```
+
+**Arguments**:
+- `--default_config <path>` - Default configuration file (default: `configs/default.yaml`)
+- `--task_config <path>` - Task-specific config that overrides defaults (optional)
+- `--verbose` - Enable verbose logging
+- `--<config_var>` - Any variable from `defaults` section in config file
+
+**Example**:
+```bash
+rag-retrieve \
+  --default_config configs/default.yaml \
+  --task_config configs/ingestbench_dense.yaml \
+  --verbose \
+  --top_k 10
+```
+
+#### rag-generate Command
+
+**Purpose**: Run RAG evaluation pipeline - retrieve context, generate responses using LLM, compute metrics.
+
+**Basic Usage**:
+```bash
+rag-generate --default_config configs/default.yaml --task_config configs/my_task.yaml
+```
+
+**Arguments**:
+- `--default_config <path>` - Default configuration file (default: `configs/default.yaml`)
+- `--task_config <path>` - Task-specific config that overrides defaults (optional)
+- `--verbose` - Enable verbose logging
+- `--<config_var>` - Any variable from `defaults` section in config file
+
+**Example**:
+```bash
+rag-generate \
+  --default_config configs/default.yaml \
+  --task_config configs/ingestbench_dense.yaml \
+  --verbose \
+  --model_name "meta-llama/Llama-2-7b-hf" \
+  --temperature 0.7 \
+  --max_tokens 512
+```
+
+#### Configuration-Based Arguments
+
+The `defaults` section of your YAML configuration file can contain any of these common parameters that will be exposed as CLI arguments:
+
+**Chunking Parameters**:
+- `chunk_size` (int) - Size of text chunks in characters (e.g., 512, 1024)
+- `chunk_overlap` (int) - Overlap between consecutive chunks (e.g., 50, 100)
+
+**Retrieval Parameters**:
+- `top_k` (int) - Number of documents to retrieve (e.g., 5, 10, 20)
+- `embedding_model_name` (str) - Embedding model identifier (e.g., `sentence-transformers/all-MiniLM-L6-v2`)
+- `embedding_device` (str) - Device for embedding model: `cpu`, `cuda`, `cuda:0`, etc.
+
+**LLM Parameters**:
+- `model_name` (str) - Language model identifier (e.g., `gpt-3.5-turbo`, `meta-llama/Llama-2-7b-hf`)
+- `provider` (str) - LLM provider: `openai`, `hf`, `vllm`, `rits`, etc.
+- `temperature` (float) - Sampling temperature (0.0-1.0, default: 0.7)
+- `max_tokens` (int) - Maximum tokens in generation (e.g., 256, 512, 1024)
+- `seed` (int) - Random seed for reproducibility (optional)
+
+**Data & File Parameters**:
+- `input_dir` (str) - Directory containing raw documents
+- `glob_pattern` (str) - Glob pattern to match documents (e.g., `**/*.txt`)
+- `output_dir` (str) - Directory for output results
+- `filename` (str) - Output filename for results
+
+**Examples with Different Configurations**:
+
+Dense retrieval with Llama-2:
+```bash
+rag-generate \
+  --task_config configs/ingestbench_dense.yaml \
+  --model_name "meta-llama/Llama-2-7b-hf" \
+  --provider "hf" \
+  --temperature 0.5
+```
+
+Sparse retrieval (BM25):
+```bash
+rag-retrieve \
+  --task_config configs/ingestbench_sparse.yaml \
+  --top_k 15
+```
+
+Custom chunking:
+```bash
+rag-index \
+  --task_config configs/my_custom_task.yaml \
+  --chunk_size 2048 \
+  --chunk_overlap 200
+```
+
+#### Configuration Priority
+
+When using multiple configurations and CLI arguments, the priority order is (highest to lowest):
+
+1. **CLI arguments** (e.g., `--chunk_size 512`)
+2. **Task configuration file** (specified with `--task_config`)
+3. **Default configuration file** (specified with `--default_config`)
+
+This means CLI arguments override task config, which overrides default config.
+
 ## Configuration
 
 RAG Recipes uses YAML-based configuration files that specify all pipeline parameters: data sources, chunking strategy, retriever type, LLM model, prompt templates, and optional custom functions for preprocessing and metrics computation. Configuration files live in your project, not in RAG Recipes, allowing different projects to use RAG Recipes with completely different setups.
