@@ -68,11 +68,11 @@ pip install git+ssh://git@github.ibm.com:Meghanadh-Pulivarthi1/rag_recipes.git
 5. **Run retrieval** to search over indexed documents
 6. **Run generation** to produce answers using retrieved context
 
-All three phases are available as CLI commands that can be invoked from any directory:
+All three phases are available through one CLI entrypoint `rag-recipes` with subcommands that can be invoked from any directory:
 
-- `rag-index`: Process and chunk documents, create vector indices
-- `rag-retrieve`: Search indexed documents for relevant context
-- `rag-generate`: Generate responses with retrieved context using an LLM
+- `rag-recipes index`: Process and chunk documents, create vector indices
+- `rag-recipes retrieve`: Search indexed documents for relevant context
+- `rag-recipes generate`: Generate responses with retrieved context using an LLM
 
 ### Command-Line Interface
 
@@ -80,7 +80,7 @@ All CLI commands support the following standard arguments plus dynamic configura
 
 #### Common Arguments (All Commands)
 
-All three CLI commands (`rag-index`, `rag-retrieve`, `rag-generate`) support these base arguments:
+The `rag-recipes` entrypoint supports these base arguments (pass a subcommand first, e.g. `rag-recipes index`):
 
 - `--default_config <path>` - Path to the default configuration file (default: `configs/default.yaml`)
 - `--task_config <path>` - Path to the task-specific configuration file that overrides defaults (optional)
@@ -91,7 +91,7 @@ All three CLI commands (`rag-index`, `rag-retrieve`, `rag-generate`) support the
 In addition to the common arguments, RAG Recipes supports **dynamic CLI arguments** that are automatically generated from your configuration file's `defaults` section. Any key in the `defaults` section of your YAML configuration can be overridden via CLI using the format:
 
 ```bash
-rag-index --key_name value
+rag-recipes index --key_name value
 ```
 
 For example, if your config has:
@@ -103,16 +103,16 @@ defaults:
 
 You can override these at runtime:
 ```bash
-rag-index --chunk_size 1024 --model_name "sentence-transformers/all-mpnet-base-v2"
+rag-recipes index --chunk_size 1024 --model_name "sentence-transformers/all-mpnet-base-v2"
 ```
 
-#### rag-index Command
+#### rag-recipes index subcommand
 
 **Purpose**: Process and chunk raw documents, build vector indices for dense retrieval, or dump chunks for sparse retrieval.
 
 **Basic Usage**:
 ```bash
-rag-index --default_config configs/default.yaml --task_config configs/my_task.yaml
+rag-recipes index --default_config configs/default.yaml --task_config configs/my_task.yaml
 ```
 
 **Arguments**:
@@ -131,13 +131,13 @@ rag-index \
   --chunk_overlap 50
 ```
 
-#### rag-retrieve Command
+#### rag-recipes retrieve subcommand
 
 **Purpose**: Search indexed documents and retrieve relevant context for given questions.
 
 **Basic Usage**:
 ```bash
-rag-retrieve --default_config configs/default.yaml --task_config configs/my_task.yaml
+rag-recipes retrieve --default_config configs/default.yaml --task_config configs/my_task.yaml
 ```
 
 **Arguments**:
@@ -155,13 +155,13 @@ rag-retrieve \
   --top_k 10
 ```
 
-#### rag-generate Command
+#### rag-recipes generate subcommand
 
 **Purpose**: Run RAG evaluation pipeline - retrieve context, generate responses using LLM, compute metrics.
 
 **Basic Usage**:
 ```bash
-rag-generate --default_config configs/default.yaml --task_config configs/my_task.yaml
+rag-recipes generate --default_config configs/default.yaml --task_config configs/my_task.yaml
 ```
 
 **Arguments**:
@@ -172,7 +172,7 @@ rag-generate --default_config configs/default.yaml --task_config configs/my_task
 
 **Example**:
 ```bash
-rag-generate \
+rag-recipes generate \
   --default_config configs/default.yaml \
   --task_config configs/ingestbench_dense.yaml \
   --verbose \
@@ -211,7 +211,7 @@ The `defaults` section of your YAML configuration file can contain any of these 
 
 Dense retrieval with Llama-2:
 ```bash
-rag-generate \
+rag-recipes generate \
   --task_config configs/ingestbench_dense.yaml \
   --model_name "meta-llama/Llama-2-7b-hf" \
   --provider "hf" \
@@ -220,14 +220,14 @@ rag-generate \
 
 Sparse retrieval (BM25):
 ```bash
-rag-retrieve \
+rag-recipes retrieve \
   --task_config configs/ingestbench_sparse.yaml \
   --top_k 15
 ```
 
 Custom chunking:
 ```bash
-rag-index \
+rag-recipes index \
   --task_config configs/my_custom_task.yaml \
   --chunk_size 2048 \
   --chunk_overlap 200
@@ -249,7 +249,7 @@ RAG Recipes uses YAML-based configuration files that specify all pipeline parame
 
 ## Design Philosophy
 
-RAG Recipes operates on a simple principle: the package provides generic, reusable components while your project provides configuration, data, and project-specific customizations. All three CLI tools (`rag-index`, `rag-retrieve`, `rag-generate`) work from any directory with no directory dependencies.
+RAG Recipes operates on a simple principle: the package provides generic, reusable components while your project provides configuration, data, and project-specific customizations. The CLI entrypoint (`rag-recipes`) works from any directory with no directory dependencies.
 
 ## Configuration Deep Dive
 
